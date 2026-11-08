@@ -1,0 +1,51 @@
+diff --git a/json.c b/json.c
+index 3bc1e68..6bf7df5 100644
+--- a/json.c
++++ b/json.c
+@@ -32,7 +32,6 @@
+ #include <ctype.h>
+ #include <errno.h>
+ #include <fcntl.h>
+-#include <lzma.h>
+ #include <stdarg.h>
+ #include <stdio.h>
+ #include <stdlib.h>
+diff --git a/pd-mapper.c b/pd-mapper.c
+index 1167e02..2984122 100644
+--- a/pd-mapper.c
++++ b/pd-mapper.c
+@@ -272,7 +272,34 @@ static char *known_extensions[] = {
+   NULL,
+ };
+ 
++/* sweet / downstream msm: no remoteproc class, the .jsn files live in the
++ * firmware partition (mounted at /vendor/firmware_mnt) and in /vendor/dsp */
++static void pd_scan_dir(struct assoc *json_set, const char *dir)
++{
++	char json_path[PATH_MAX];
++	struct dirent *de;
++	DIR *d = opendir(dir);
++	if (!d)
++		return;
++	while ((de = readdir(d)) != NULL) {
++		size_t len = strlen(de->d_name);
++		if (len > 4 && !strcmp(&de->d_name[len - 4], ".jsn")) {
++			snprintf(json_path, sizeof(json_path), "%s/%s", dir, de->d_name);
++			assoc_set(json_set, json_path, NULL);
++		}
++	}
++	closedir(d);
++}
++
+ static int pd_enumerate_jsons(struct assoc *json_set)
++{
++	pd_scan_dir(json_set, "/vendor/firmware_mnt/image");
++	pd_scan_dir(json_set, "/vendor/dsp");
++	pd_scan_dir(json_set, "/vendor/firmware");
++	return 0;
++}
++
++static int pd_enumerate_jsons_rproc(struct assoc *json_set)
+ {
+ 	char firmware_value[PATH_MAX];
+ 	char *firmware_value_copy = NULL;

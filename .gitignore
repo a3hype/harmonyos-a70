@@ -1,0 +1,42 @@
+# Never publish: firmware, device files, identifiers, calibration
+*.img
+*.mbn
+*.mdt
+*.b[0-9][0-9]
+*.tlv
+*.bin
+*.elf
+*.tgz
+*.tar
+*.tar.gz
+*.zip
+*.hap
+*.txt.gz
+*.gz
+
+# Device libraries and build output
+*.so
+*.so.*
+*.o
+*.a
+devlibs/
+bin/
+build/
+
+# Private backups and logs
+backup/
+backups/
+efs/
+sec_efs/
+persist/
+modem-efs/
+modemst*
+fsg
+fsc
+registry/
+HANDOFF*.md
+*.log
+last_kmsg*
+ramoops*
+pmsg*
+hilog*

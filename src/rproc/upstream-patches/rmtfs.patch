@@ -1,0 +1,77 @@
+diff --git a/sharedmem.c b/sharedmem.c
+index c37a58d..4df1936 100644
+--- a/sharedmem.c
++++ b/sharedmem.c
+@@ -8,7 +8,7 @@
+ #ifndef ANDROID
+ #include <libudev.h>
+ #else
+-#include <sys/endian.h>
++#include <endian.h>
+ #endif
+ #include <stdbool.h>
+ #include <stdio.h>
+@@ -257,10 +257,61 @@ err_close_fd:
+ 	return -saved_errno;
+ }
+ 
++/* downstream msm kernels: msm_sharedmem exposes the region as a UIO device
++ * named "rmtfs"; find it through sysfs (no udev on HarmonyOS) */
++static int read_hex_file(const char *path, uint64_t *val)
++{
++	char buf[64] = {0};
++	int fd = open(path, O_RDONLY);
++	if (fd < 0)
++		return -errno;
++	read(fd, buf, sizeof(buf) - 1);
++	close(fd);
++	*val = strtoull(buf, NULL, 16);
++	return 0;
++}
++
+ static int rmtfs_mem_open_uio(struct rmtfs_mem *rmem, int client_id)
+ {
+-	fprintf(stderr, "uio access is not supported on ANDROID yet\n");
+-	return -EINVAL;
++	char path[PATH_MAX];
++	char name[64];
++	(void)client_id;
++	for (int i = 0; i < 16; i++) {
++		snprintf(path, sizeof(path), "/sys/class/uio/uio%d/name", i);
++		int fd = open(path, O_RDONLY);
++		if (fd < 0)
++			continue;
++		memset(name, 0, sizeof(name));
++		read(fd, name, sizeof(name) - 1);
++		close(fd);
++		if (strncmp(name, "rmtfs", 5) != 0)
++			continue;
++		uint64_t addr, size;
++		snprintf(path, sizeof(path), "/sys/class/uio/uio%d/maps/map0/addr", i);
++		if (read_hex_file(path, &addr) < 0)
++			return -ENOENT;
++		snprintf(path, sizeof(path), "/sys/class/uio/uio%d/maps/map0/size", i);
++		if (read_hex_file(path, &size) < 0)
++			return -ENOENT;
++		snprintf(path, sizeof(path), "/dev/uio%d", i);
++		rmem->fd = open(path, O_RDWR);
++		if (rmem->fd < 0) {
++			fprintf(stderr, "failed to open %s: %s\n", path, strerror(errno));
++			return -errno;
++		}
++		rmem->address = addr;
++		rmem->size = size;
++		rmem->base = mmap(0, rmem->size, PROT_READ | PROT_WRITE, MAP_SHARED, rmem->fd, 0);
++		if (rmem->base == MAP_FAILED) {
++			fprintf(stderr, "failed to mmap uio: %s\n", strerror(errno));
++			close(rmem->fd);
++			return -errno;
++		}
++		fprintf(stderr, "rmtfs: using %s addr 0x%llx size 0x%llx\n", path,
++			(unsigned long long)addr, (unsigned long long)size);
++		return 0;
++	}
++	return -ENOENT;
+ }
+ 
+ #endif

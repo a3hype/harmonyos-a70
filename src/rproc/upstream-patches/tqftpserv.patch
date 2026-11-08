@@ -1,0 +1,113 @@
+diff --git a/tqftpserv.c b/tqftpserv.c
+index a21778f..1348011 100644
+--- a/tqftpserv.c
++++ b/tqftpserv.c
+@@ -923,6 +923,7 @@ static void print_usage(void)
+ 
+ int main(int argc, char **argv)
+ {
++	setvbuf(stdout, NULL, _IOLBF, 0); /* sweet: output goes to /dev/kmsg */
+ 	struct tftp_client *client;
+ 	struct tftp_client *next;
+ 	struct sockaddr_qrtr sq;
+diff --git a/translate.c b/translate.c
+index 246b82d..084acd4 100644
+--- a/translate.c
++++ b/translate.c
+@@ -29,7 +29,7 @@
+ 
+ #ifndef ANDROID
+ #define FIRMWARE_BASE	"/lib/firmware/"
+-#define TQFTPSERV_RW_DIR	"/var/lib/tqftpserv"
++#define TQFTPSERV_RW_DIR	"/data/vendor/tqftpserv"	/* sweet: HarmonyOS has no /var */
+ #else
+ #define FIRMWARE_BASE	"/vendor/firmware/"
+ #define TQFTPSERV_RW_DIR	"/data/vendor/tmp/tqftpserv"
+@@ -65,7 +65,7 @@ static void read_fw_path_from_sysfs(char *outbuffer, size_t bufsize)
+  *
+  * Return: opened fd on success, -1 otherwise
+  */
+-static int translate_readonly(const char *file)
++static int translate_readonly_rproc(const char *file)
+ {
+ 	char firmware_value[PATH_MAX];
+ 	char *firmware_value_copy = NULL;
+@@ -167,6 +167,27 @@ static int translate_readonly(const char *file)
+ 	return fd;
+ }
+ 
++
++/* sweet / downstream msm: no remoteproc class; the modem reads its files from
++ * the firmware ("modem") partition mounted at /vendor/firmware_mnt */
++static int translate_readonly(const char *file)
++{
++	static const char *const bases[] = {
++		"/vendor/firmware_mnt/image/", "/vendor/firmware_mnt/", "/vendor/firmware/", "/vendor/dsp/", NULL
++	};
++	char path[PATH_MAX];
++	while (*file == '/')
++		file++;
++	for (int i = 0; bases[i]; i++) {
++		snprintf(path, sizeof(path), "%s%s", bases[i], file);
++		int fd = open(path, O_RDONLY);
++		if (fd >= 0)
++			return fd;
++	}
++	warnx("readonly file not found: %s", file);
++	return -1;
++}
++
+ /**
+  * translate_readwrite() - open "file" from the persistent readwrite directory
+  * @file:	relative path of the requested file, with /readwrite/ stripped
+@@ -192,6 +213,17 @@ static int translate_readwrite(const char *file, int flags)
+ 		return -1;
+ 	}
+ 
++	if (flags & O_CREAT) {
++		/* sweet: create missing parent directories of nested paths */
++		char tmp[PATH_MAX];
++		snprintf(tmp, sizeof(tmp), "%s", file);
++		for (char *p = strchr(tmp, '/'); p; p = strchr(p + 1, '/')) {
++			*p = 0;
++			if (tmp[0])
++				mkdirat(base, tmp, 0700);
++			*p = '/';
++		}
++	}
+ 	fd = openat(base, file, flags, 0600);
+ 	close(base);
+ 	if (fd < 0)
+@@ -251,7 +283,32 @@ int sanitize_path(const char *path)
+  * and searches among remoteproc firmware.
+  * Replaces /readwrite/ with a persistent directory.
+  */
++static int translate_open_real(const char *path, int flags);
++
++/* sweet: log each distinct request once (the modem retries a lot) */
+ int translate_open(const char *path, int flags)
++{
++	static unsigned long seen[128];
++	static int nseen;
++	unsigned long h = 5381;
++	int fd, i;
++
++	for (const char *c = path; *c; c++)
++		h = h * 33 + (unsigned char)*c;
++	h = h * 2 + ((flags & O_ACCMODE) != O_RDONLY);
++	fd = translate_open_real(path, flags);
++	for (i = 0; i < nseen && seen[i] != h; i++)
++		;
++	if (i == nseen) {
++		if (nseen < 128)
++			seen[nseen++] = h;
++		fprintf(stderr, "tqftpserv: %s %s -> %s\n", (flags & O_ACCMODE) == O_RDONLY ? "read" : "write",
++			path, fd >= 0 ? "ok" : strerror(errno));
++	}
++	return fd;
++}
++
++static int translate_open_real(const char *path, int flags)
+ {
+ 	if (sanitize_path(path) < 0) {
+ 		warnx("path traversal attempt rejected: %s", path);
