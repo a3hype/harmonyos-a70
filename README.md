@@ -71,6 +71,4 @@ Ported by **[@a3hype](https://github.com/a3hype)**. This builds directly on othe
 - **[linux-msm/hexagonrpc](https://github.com/linux-msm/hexagonrpc)**: the DSP file server.
 - **OpenHarmony**: the driver interface headers.
 
-Most of this code was written with an AI coding assistant, with testing on a real phone. Expect rough edges, and read it before you run it.
-
 Not affiliated with Huawei, Samsung, Qualcomm or any project above. HarmonyOS and Galaxy are trademarks of their owners.
