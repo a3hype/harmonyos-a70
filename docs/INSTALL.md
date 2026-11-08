@@ -1,8 +1,56 @@
 # Install
 
-> **There is no one-click installer yet.** The scripted path (stock XGSI written in pieces, `userdata` formatted, `a70_data_stage.sh write`, `a70_install.py install --write`) was tested once, on one phone that already had Lineage's `vendor` with `a612_zap`, BrBL and the custom recovery. It booted to the home screen with everything below working except the browser. Expect to fix things yourself, and read each script first.
+> **Tested on one phone:** an SM-A705FN with Lineage recovery, going from Lineage 22.2 to HarmonyOS with the steps below. Other A70 variants, other recoveries such as TWRP, and other BrBL versions are untested. **This wipes the phone.**
 
-## What you need
+## Quick install
+
+### You need
+
+| What | Where |
+|---|---|
+| A Galaxy A70 (`a70q`) with an **unlocked bootloader** and **Lineage 22.2** installed, with Lineage recovery | Unlocking trips Knox permanently and wipes the phone |
+| The system partition **resized to 15 GB** with `A70-Repartitioner-NO-BACKUP` | [A70 Chat](https://t.me/a70chat) on Telegram. It rewrites the partition table, so back up first |
+| The **BrBL** kernel zip (`BrBLKernel-a70q-…zip`) | [A70 Chat](https://t.me/a70chat) |
+| **XGSI HarmonyOS NEXT 5.1.0.128(SP5)** `system.img` (6.3 GB) | XGSI's own release. This is the only build the patcher accepts |
+| The **patcher zip** `a70-harmonyos-patcher.zip` | This repo's [Releases](../../releases) |
+| A PC with `adb` and `fastboot` ([platform-tools](https://developer.android.com/tools/releases/platform-tools)) and Python 3 | |
+
+Back up `efs`, `sec_efs`, `persist` and the modem partitions first, and keep those backups private: they hold your IMEI and calibration data.
+
+### Steps
+
+1. **Recovery → Apply update → Apply from ADB**, then on the PC:
+   ```
+   adb sideload BrBLKernel-a70q-<version>.zip
+   ```
+2. **Recovery → Advanced → Enter fastboot**, then flash XGSI in pieces:
+   ```
+   python flash_system.py system.img fastboot.exe flashwork
+   ```
+   `flash_system.py` is in `scripts/`. Don't use plain `fastboot flash system system.img`: it has written damaged data above 4 GiB while reporting OKAY.
+3. **Enter recovery → Factory reset → Format data/factory reset.**
+4. **Apply update → Apply from ADB**, then:
+   ```
+   adb sideload a70-harmonyos-patcher.zip
+   ```
+   Recovery says the signature can't be verified. Choose **Yes** to install anyway. The patcher checks your phone, the XGSI image (1–2 minutes), and every file before it writes anything, and stops with a message if something is wrong.
+5. **Reboot system now.** The first boot takes a few minutes.
+
+If the patcher stops, its log is in `/tmp/a70_patcher.log` in recovery (`adb pull /tmp/a70_patcher.log`). It's safe to run again.
+
+### What the patcher does
+
+- Writes 17 of this project's files to `system` and makes 6 small edits to XGSI's own config files. It contains no Huawei, Samsung or Qualcomm files. Every result is checked against the hash of the tested version.
+- Copies the GPU firmware (`a612_zap`) from your phone's `apnhlos` into `vendor`, if it's missing.
+- Copies your phone's own modem, DSP, sensor and audio files, and the ArkWeb engine, to `/data/a70fw`.
+
+**Going back to Android:** sideload Lineage from recovery, then format data.
+
+## Manual install (for development)
+
+The rest of this page is how the phone was set up by hand, one change at a time. The patcher does all of it.
+
+### What you need
 
 - A Galaxy A70 (SM-A705FN tested; other variants unknown), with an unlocked bootloader. **Unlocking trips Knox permanently and wipes the phone.**
 - A custom recovery with adb. Lineage recovery was used.
@@ -12,7 +60,7 @@
 
 Back up your partition table, `efs`, `sec_efs`, `persist` and the modem partitions first, and keep those backups private.
 
-## 1. Flash the base
+### 1. Flash the base
 
 1. Install Lineage once, so `vendor` is in place.
 2. Sideload BrBL.
@@ -25,7 +73,7 @@ Back up your partition table, `efs`, `sec_efs`, `persist` and the modem partitio
 
 Reboot with the recovery menu's **Reboot system now**. `adb reboot` from recovery can return to recovery.
 
-## 2. Copy the phone's own files to `/data`
+### 2. Copy the phone's own files to `/data`
 
 XGSI hides block devices, so these all live under `/data/a70fw`. **Formatting `userdata` removes them.**
 
@@ -38,7 +86,7 @@ XGSI hides block devices, so these all live under `/data/a70fw`. **Formatting `u
 | `/data/a70fw/arkweb` | ArkWeb engine from `system/module_update/ArkWebCore/module.img`, copied from recovery |
 | `/data/a70fw/sensors/root` | Sensor files, built by `scripts/install/sensors_setup.sh` from an archive of your `vendor/etc/sensors` and `persist/sensors` |
 
-## 3. Install the components
+### 3. Install the components
 
 Build everything first ([BUILD](BUILD.md)), then install from recovery with `system` mounted. All paths are under `system/xgsi/harmony`. The `system` image has few free inodes, so overwrite existing files in place where you can.
 
@@ -60,7 +108,7 @@ Build everything first ([BUILD](BUILD.md)), then install from recovery with `sys
 
 The scripts in `scripts/install` check file hashes and expect certain files in `/tmp`, so they won't run unmodified on a different setup.
 
-## Tools
+### Tools
 
 Set `A70_ADB` and `A70_HDC` if `adb` and `hdc` aren't on your PATH, and `A70_SERIAL` if more than one device is connected.
 
@@ -71,7 +119,7 @@ Set `A70_ADB` and `A70_HDC` if `adb` and `hdc` aren't on your PATH, and `A70_SER
 
 Recovery's adb on the test phone dropped every ~128 MB on one cable and port; a different cable and port, plus a reboot of recovery, fixed it. The phone's own `gzip` stops at 1 MiB, so the scripts compress on the PC.
 
-## 4. First boot
+### 4. First boot
 
 The first boot takes longer. With the installer shim already on `system`, the ArkWeb engine installs itself during the first boot, so no `bm install` is needed. The browser itself still crashes in the GPU driver on this phone. If the boot animation never finishes after a damaged-image boot, format `userdata`, because the app installer only scans on first boot.
 

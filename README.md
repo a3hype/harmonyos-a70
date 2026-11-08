@@ -4,6 +4,10 @@ An experimental bring-up of HarmonyOS NEXT 5.1 on the Samsung Galaxy A70 (SM-A70
 
 **This is a personal test project, not a daily-driver ROM.** It has been tested on one phone. It relies on modified system files and weakened security checks, so don't sign in to real accounts on it.
 
+## Install
+
+From Lineage 22.2 with a 15 GB system partition: sideload BrBL, flash XGSI 5.1.0.128(SP5), format data, then sideload the patcher zip from [Releases](../../releases). Full steps: **[docs/INSTALL.md](docs/INSTALL.md)**.
+
 ## Status
 
 | Feature | State | Notes |
@@ -29,7 +33,7 @@ An experimental bring-up of HarmonyOS NEXT 5.1 on the Samsung Galaxy A70 (SM-A70
 
 ## What this repo is
 
-Source code and instructions only. **It contains no firmware.** You supply XGSI, BrBL and a Lineage vendor yourself, and your phone's own Samsung files are copied from its own partitions.
+Source code, instructions and the patcher zip. **It contains no firmware.** You supply XGSI, BrBL and a Lineage vendor yourself, and your phone's own Samsung files are copied from its own partitions.
 
 | Path | Contents |
 |---|---|
@@ -43,7 +47,8 @@ Source code and instructions only. **It contains no firmware.** You supply XGSI,
 | `src/shutdown` | Finishes reboots and power-offs, fixes charger-mode boots |
 | `src/shim` | Fakes fs-verity for the app installer, see the warnings below |
 | `src/tools` | Read-only test tools |
-| `config`, `scripts` | Boot config, install and patch scripts |
+| `patcher` | The recovery zip's install script, edits and manifest; `scripts/make_patcher_zip.py` builds it |
+| `config`, `scripts` | Boot config, install and patch scripts, `flash_system.py` |
 | `docs` | [Install](docs/INSTALL.md), [Build](docs/BUILD.md), [Technical notes](docs/TECHNICAL.md) |
 
 ## Security warnings

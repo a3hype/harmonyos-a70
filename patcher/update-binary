@@ -1,0 +1,144 @@
+#!/sbin/sh
+# HarmonyOS NEXT on the Galaxy A70: patcher for XGSI 5.1.0.128(SP5) + BrBL.
+# Run by recovery: update-binary <api> <outfd> <zip>. Writes only system, vendor (a612_zap, if missing) and userdata.
+OUTFD=$2
+ZIP=$3
+W=/tmp/a70p
+SYSM=/tmp/a70s
+H=$SYSM/system/xgsi/harmony
+LOG=/tmp/a70_patcher.log
+
+ui() { echo "ui_print $1" > /proc/self/fd/$OUTFD; echo "ui_print" > /proc/self/fd/$OUTFD; echo "$1" >> $LOG; }
+sha() { sha256sum "$1" 2>/dev/null | cut -d' ' -f1; }
+cleanup() { umount $SYSM 2>/dev/null; umount /tmp/a70v 2>/dev/null; umount /tmp/a70fw 2>/dev/null; }
+die() { ui "ERROR: $1"; ui "Nothing after this step was changed. Log: $LOG"; cleanup; exit 1; }
+
+: > $LOG
+ui "HarmonyOS NEXT for Galaxy A70 - patcher"
+ui "-------------------------------------"
+
+# 1. Device
+DEV=$(getprop ro.product.device)
+[ -z "$DEV" ] && DEV=$(getprop ro.build.product)
+case "$DEV" in a70q) ;; *) die "this is for the Galaxy A70 (a70q), this device says '$DEV'" ;; esac
+ui "Device: $DEV"
+
+# 1b. Data must be freshly formatted (checked before anything is written)
+FMT="Format data first: Factory reset > Format data/factory reset, then sideload this zip again"
+mkdir -p /tmp/a70d
+umount /tmp/a70d 2>/dev/null
+mount -t f2fs -o ro /dev/block/by-name/userdata /tmp/a70d >> $LOG 2>&1 || die "data can't be read (still encrypted by Android?). $FMT"
+if [ -d /tmp/a70d/unencrypted ] || [ -d /tmp/a70d/misc/vold ] || [ -d /tmp/a70d/system_ce ]; then
+  umount /tmp/a70d; die "data still holds Android's files. $FMT"
+fi
+umount /tmp/a70d
+ui "Data: formatted, OK"
+
+# 2. Unpack and check the zip contents
+rm -rf $W; mkdir -p $W
+unzip -o -q "$ZIP" -d $W >> $LOG 2>&1 || die "could not unpack the zip"
+[ -f $W/manifest.txt ] || die "manifest missing from the zip"
+BAD=0
+while IFS='|' read -r T TARGET SRC MODE OWNER REF STOCK OURS; do
+  case "$T" in F) [ "$(sha $W/$SRC)" = "$OURS" ] || { echo "damaged: $SRC" >> $LOG; BAD=1; } ;; esac
+done < $W/manifest.txt
+[ $BAD = 0 ] || die "the zip is damaged, download it again"
+ui "Zip contents verified"
+
+# 3. System: must be the XGSI build this was made for
+mkdir -p $SYSM
+umount $SYSM 2>/dev/null
+mount -t ext4 -o ro,noload /dev/block/by-name/system $SYSM || die "could not mount system (is XGSI flashed?)"
+[ -d $H/system/bin ] || die "system is not XGSI. Flash the XGSI image first"
+grep -q '^const.comp.hl.product_base_version=ADY-LGRP3-CHN 5.1.0.128(SP5)$' $H/sys_prod/etc/param/hw_defaults.para || die "this XGSI build is not 5.1.0.128(SP5), the only one supported"
+ui "System: XGSI 5.1.0.128(SP5)"
+
+# 4. Check every target before writing anything
+while IFS='|' read -r T TARGET SRC MODE OWNER REF STOCK OURS; do
+  [ "$T" = F ] || [ "$T" = E ] || continue
+  P=$H/$TARGET
+  if [ -f $P ]; then C=$(sha $P); else C=absent; fi
+  case "$C" in
+    "$OURS") ;;
+    "$STOCK") ;;
+    absent) [ "$T" = F ] && [ "$STOCK" = - ] || die "missing stock file /$TARGET" ;;
+    *) die "/$TARGET is neither stock nor ours (modified by something else?)" ;;
+  esac
+done < $W/manifest.txt
+FREE=$(df -i $SYSM 2>/dev/null | tail -1 | tr -s ' ' | cut -d' ' -f4)
+echo "free inodes: $FREE" >> $LOG
+ui "All targets checked"
+
+# 4b. On a fresh XGSI (nothing of ours yet), check the whole image, since a bad flash can look normal
+OURS_N=0
+while IFS='|' read -r T TARGET SRC MODE OWNER REF STOCK OURS; do
+  [ "$T" = F ] || [ "$T" = E ] || continue
+  [ -f $H/$TARGET ] && [ "$(sha $H/$TARGET)" = "$OURS" ] && OURS_N=$((OURS_N+1))
+done < $W/manifest.txt
+if [ $OURS_N = 0 ]; then
+  ui "Checking the XGSI image (1-2 minutes)..."
+  IMGSHA=$(dd if=/dev/block/by-name/system bs=4096 count=1547454 2>/dev/null | sha256sum | cut -d' ' -f1)
+  [ "$IMGSHA" = b129b5eab4c55bc7f83496cb582cc291dcd697697b4a90aec23a99846cd6f65e ] || die "the XGSI image on system is damaged or a different file (hash $IMGSHA). Flash it again with flash_system.py"
+  ui "XGSI image verified"
+fi
+umount $SYSM || die "could not unmount system"
+mount -t ext4 -o rw,noatime /dev/block/by-name/system $SYSM || die "could not mount system read-write"
+
+# 5. Write
+NEW=0; DONE=0; SAME=0
+while IFS='|' read -r T TARGET SRC MODE OWNER REF STOCK OURS; do
+  [ "$T" = F ] || [ "$T" = E ] || continue
+  P=$H/$TARGET
+  if [ -f $P ]; then C=$(sha $P); else C=absent; fi
+  if [ "$C" = "$OURS" ]; then SAME=$((SAME+1)); echo "same /$TARGET" >> $LOG; continue; fi
+  if [ "$T" = F ]; then
+    [ "$C" = absent ] && NEW=$((NEW+1))
+    L=""
+    [ "$REF" != - ] && L=$(ls -Z $H/$REF | sed 's/^ *//' | cut -d' ' -f1)
+    cat $W/$SRC > $P || die "write failed /$TARGET"
+    chown $OWNER $P; chmod $MODE $P
+    if [ -n "$L" ]; then case "$L" in u:object_r:*) chcon "$L" $P ;; *) die "bad label for /$TARGET" ;; esac; fi
+  else
+    cp $P $W/edit.tmp
+    sed -i -f $W/$SRC $W/edit.tmp
+    [ "$(sha $W/edit.tmp)" = "$OURS" ] || die "edit of /$TARGET gave an unexpected result"
+    cat $W/edit.tmp > $P || die "write failed /$TARGET"
+  fi
+  [ "$(sha $P)" = "$OURS" ] || die "verify failed /$TARGET"
+  DONE=$((DONE+1)); echo "wrote /$TARGET" >> $LOG
+done < $W/manifest.txt
+sync
+umount $SYSM
+ui "System: $DONE written ($NEW new), $SAME already done"
+e2fsck -fn /dev/block/by-name/system >> $LOG 2>&1
+
+# 6. GPU firmware in vendor (a612_zap), only if missing
+mkdir -p /tmp/a70v /tmp/a70fw
+mount -t ext4 -o rw,noatime /dev/block/by-name/vendor /tmp/a70v || die "could not mount vendor"
+if [ -f /tmp/a70v/firmware/a612_zap.mdt ]; then
+  ui "Vendor: GPU firmware already there"
+else
+  [ -f /tmp/a70v/firmware/a612_rgmu.bin ] || die "vendor has no firmware dir. Install the Lineage vendor first"
+  mount -t vfat -o ro /dev/block/by-name/apnhlos /tmp/a70fw || die "could not mount apnhlos"
+  L=$(ls -Z /tmp/a70v/firmware/a612_rgmu.bin | sed 's/^ *//' | cut -d' ' -f1)
+  for n in a612_zap.mdt a612_zap.b00 a612_zap.b01 a612_zap.b02; do
+    cat /tmp/a70fw/image/$n > /tmp/a70v/firmware/$n || die "copy failed $n"
+    chown root:root /tmp/a70v/firmware/$n; chmod 0644 /tmp/a70v/firmware/$n; chcon "$L" /tmp/a70v/firmware/$n
+    [ "$(sha /tmp/a70fw/image/$n)" = "$(sha /tmp/a70v/firmware/$n)" ] || die "verify failed $n"
+  done
+  umount /tmp/a70fw
+  ui "Vendor: GPU firmware copied from apnhlos"
+fi
+sync; umount /tmp/a70v
+
+# 7. Phone firmware into /data/a70fw (from this phone's own partitions)
+ui "Copying this phone's firmware to /data/a70fw..."
+sh $W/data_stage.sh write >> $LOG 2>&1 || die "firmware copy failed"
+grep -q 'mounts left: 0' $LOG || ui "warning: something stayed mounted, see the log"
+ui "Data: done"
+
+ui "-------------------------------------"
+ui "Done. Reboot with 'Reboot system now'."
+ui "The first boot takes a few minutes."
+cp $LOG /tmp/recovery_a70.log 2>/dev/null
+exit 0
