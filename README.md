@@ -21,7 +21,7 @@ An experimental bring-up of HarmonyOS NEXT 5.1 on the Samsung Galaxy A70 (SM-A70
 | Status bar layout | Works | Cutout width is an estimate; landscape unchecked |
 | Auto-rotate | Not working | Sensor data is fine; the window manager doesn't seem to use it. See [TECHNICAL](docs/TECHNICAL.md) |
 | Browser | Not working | The ArkWeb engine installs, but the browser crashes in the GPU driver while drawing |
-| About device | Works | Shows "HUAWEI Pura A70"; the model code stays XGSI's placeholder |
+| About device | Works | Custom name through one parameter line; the version lines are built at runtime and can't be changed this way |
 | Camera | Not working | Kernel side is present; no camera service for this hardware |
 | Calls, mobile data, IMEI | Not working | The modem runs, but there is no RIL |
 | Earpiece, headphones | Untested | |
