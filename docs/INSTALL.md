@@ -46,6 +46,23 @@ If the patcher stops, its log is in `/tmp/a70_patcher.log` in recovery (`adb pul
 
 **Going back to Android:** sideload Lineage from recovery, then format data.
 
+### Reporting a problem
+
+Attach a log:
+
+- **The phone boots:** use `hdc` from the [OpenHarmony SDK](https://repo.huaweicloud.com/openharmony/os/5.0.0-Release/) toolchains:
+  ```
+  hdc shell hilog -x > hilog.txt
+  hdc shell dmesg > dmesg.txt
+  ```
+- **It doesn't boot, or it reset:** force-reboot into recovery (Vol Down + Power, then Vol Up + Power) and pull the previous boot's kernel log:
+  ```
+  adb pull /proc/last_kmsg last_kmsg.txt
+  ```
+- **The patcher stopped:** `adb pull /tmp/a70_patcher.log` from recovery, before rebooting.
+
+Logs can contain your device's identifiers, so check them before posting them publicly.
+
 ## Manual install (for development)
 
 The rest of this page is how the phone was set up by hand, one change at a time. The patcher does all of it.
